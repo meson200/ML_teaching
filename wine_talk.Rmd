@@ -1,0 +1,146 @@
+---
+title: "Exploratory Data Analysis on the Wine Dataset"
+runtime: shiny
+output: 
+  ioslides_presentation:
+    theme: lumen
+    logo: McGill_Logo.png
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Wine dataset
+<img style="float: right;" src="wine.jpg">
+This labelled dataset contains a quality score (0-10) and 11 chemical test results on the variety of Portuguese "Vino Verde" wine [(Cortez et al., 2009.)](https://www.stat.auckland.ac.nz/~stats330/datasets.dir/cortez2009.pdf)
+
+## The first look of the data
+
+```{r, echo = TRUE}
+  WhiteWine <- read.csv("winequality-white.csv",sep = ";")
+  str(WhiteWine)
+```
+
+## The first look of the data
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+  library(reshape2)
+  library(ggplot2)
+  Wlong <- melt(WhiteWine,na.rm=TRUE)  
+  Wlong$variable <- as.factor(Wlong$variable)
+  ggplot(Wlong, aes(y=value,x=factor(0))) +
+  geom_boxplot() + 
+  facet_wrap(~variable,scales="free") +
+  theme(axis.title.x=element_blank(),
+  axis.text.x=element_blank(),
+  axis.ticks.x=element_blank())
+```
+
+
+## Correlation between variables
+```{r}
+  pairs(WhiteWine[,-12], gap=0, pch=19, cex=0.4, col="darkblue")  
+```
+
+## Correlation between variables
+```{r, message = FALSE}
+library(ellipse)
+xc = cor(WhiteWine[,-12])
+colors <- c("#A50F15","#DE2D26","#FB6A4A","#FCAE91","#FEE5D9","white","#EFF3FF","#BDD7E7","#6BAED6","#3182BD","#08519C") 
+plotcorr(xc, col=colors[5*xc + 6],mar = c(0,0,2,0))    
+```
+
+## Identify clustering patterns
+```{r, message = FALSE}
+library(gplots)
+heatmap.2(scale(data.matrix(WhiteWine[,-12])),srtCol=45,margins=c(7,7),trace='none',labRow = "")
+```
+
+## Principal component analysis
+```{r, echo = 1, message = FALSE}
+WinePC<-prcomp(data.matrix(WhiteWine[,-12]),center = TRUE, scale. = TRUE)
+print(WinePC)
+```
+
+## Principal component analysis
+```{r, echo = 1, message = FALSE, fig.height=6, fig.width=6}
+var_pc <- data.frame(components=1:11,var.cumsum = cumsum(WinePC$sdev^2)[1:11]/11*100)
+ggplot(var_pc,aes(x=components,y=var.cumsum)) + geom_line() + geom_point() + ylab("% of variance explained") + geom_hline(yintercept=90,colour = "red")
+```
+
+## Kohonen map
+```{r, echo = 3:4, message = FALSE, warning = FALSE}
+library(kohonen)
+set.seed(7)
+koh <- xyf(scale(data.matrix(WhiteWine[,-12])),WhiteWine[,12],
+              grid = somgrid(4, 4, "hexagonal"), rlen=100)
+plot(koh, type="changes")
+```
+
+## Kohonen map
+
+```{r}
+inputPanel(
+  selectInput("varname", label = "Variable to plot",
+              choices = names(WhiteWine[-12]), selected = 20)
+)
+renderPlot({
+  par(mfrow=c(1,2))
+  plot(koh, type = "property",
+       property = koh$codes$Y,main="Quality")
+  plot(koh, type= "property",
+       property=koh$codes$X[,input$varname],
+       main = input$varname)
+})
+
+```
+
+## Wine quality prediction model
+We will first split the data randomly into training and testing. The training set will have a size of 4000:
+```{r, echo = TRUE}
+set.seed(7)
+tr_rows <- sample(1:nrow(WhiteWine),4000,replace=FALSE)
+Wine_train <- WhiteWine[tr_rows,]
+Wine_test <- WhiteWine[-tr_rows,]
+```
+
+## Linear regression model
+```{r, echo=1:3}
+Wine_train_n  <- data.frame(lapply(Wine_train, scale))
+fit1 <- lm(quality ~ ., data=Wine_train_n)
+fit1$coefficients
+```
+
+## Linear regression model: variable importance
+```{r}
+plot(1:12,abs(fit1$coefficients),xlab = "",xaxt = "n")
+axis(1,at = 1:12, labels=names(fit1$coefficients),cex.axis=0.7)
+```
+
+## Linear regression: parsimonious model
+```{r, echo=TRUE}
+library(MASS)
+fit2 <- stepAIC(fit1, direction="both",trace=0)
+fit2$coefficients
+```
+
+## Linear regression: random forest
+```{r, echo=TRUE}
+library(randomForest)
+fit3 <- randomForest(quality ~ ., data=Wine_train_n, ntree=500)
+print(fit3)
+```
+
+
+## Linear regression: testing
+```{r}
+Wine_test_n  <- data.frame(lapply(Wine_test, scale))
+p1 <- predict(fit1,newdata = Wine_test_n,se.fit=TRUE)
+p2 <- predict(fit2,newdata = Wine_test_n,se.fit=TRUE)
+p3 <- predict(fit3,newdata = Wine_test_n,se.fit=TRUE)
+sum((Wine_test_n$quality-p1$fit)^2)/nrow(Wine_test_n)
+sum((Wine_test_n$quality-p2$fit)^2)/nrow(Wine_test_n)
+sum((Wine_test_n$quality-p3)^2)/nrow(Wine_test_n)
+```
+
